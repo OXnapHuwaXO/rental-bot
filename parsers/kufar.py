@@ -19,17 +19,14 @@ HEADERS = {
 
 
 async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
-    max_price_cents = max_price_usd * 100
-
     params = {
         "cat": "1010",           # Квартиры, долгосрочная аренда
         "cur": "USD",
-        "prc": f"r:0,{max_price_cents}",
+        "prc": f"r:0,{max_price_usd}",
         "sort": "lst.d",         # Новые сначала
         "size": 30,
         "lang": "ru",
-        "rgn": "minsk",          # Только Минск
-        "ar": "v.minsk",         # Дополнительный фильтр города
+        "rgn": "7",              # Только Минск (ID региона)
     }
 
     ads = []
@@ -54,50 +51,41 @@ async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
             title = item.get("subject", "")
             url = f"https://www.kufar.by/item/{ad_id}"
 
-            # Цена в USD
+            # Цена в USD (API возвращает в центах, делим на 100)
             price = None
-            for param in item.get("ad_parameters", []):
-                if param.get("p") == "price_usd":
-                    try:
-                        price = float(param["v"]) / 100
-                    except Exception:
-                        pass
-
-            if price is None:
-                for field in ("price_usd", "usd_price"):
-                    raw = item.get(field)
-                    if raw:
-                        try:
-                            price = float(raw) / 100 if float(raw) > 10000 else float(raw)
-                        except Exception:
-                            pass
+            raw_price = item.get("price_usd")
+            if raw_price:
+                try:
+                    price = float(raw_price) / 100
+                except Exception:
+                    pass
 
             if price is not None and price > max_price_usd:
                 continue
 
-            # Адрес
+            # Адрес: сначала из account_parameters, потом из ad_parameters
             address_parts = []
-            for param in item.get("ad_parameters", []):
-                label = param.get("pl", "").lower()
-                value = param.get("vl", "")
-                if any(kw in label for kw in ("город", "район", "улица", "адрес", "metro", "метро")):
-                    if value:
-                        address_parts.append(value)
+            for param in item.get("account_parameters", []):
+                if param.get("p") == "address":
+                    val = param.get("v", "")
+                    if val:
+                        address_parts.append(val)
 
             if not address_parts:
-                city = item.get("city_name") or "Минск"
-                region = item.get("region_name")
-                parts = [p for p in [city, region] if p]
-                address_parts = parts
+                for param in item.get("ad_parameters", []):
+                    if param.get("p") == "area":
+                        val = param.get("vl", "")
+                        if val:
+                            address_parts.append(val)
+
+            if not address_parts:
+                for param in item.get("ad_parameters", []):
+                    if param.get("p") == "region":
+                        val = param.get("vl", "")
+                        if val:
+                            address_parts.append(val)
 
             address = ", ".join(address_parts) if address_parts else "Минск"
-
-            # Проверка что объявление из Минска
-            full_text = (title + address + str(item.get("city_name", ""))).lower()
-            if address and any(kw in full_text for kw in ("минск", "minsk")):
-                pass  # ок
-            elif not address:
-                continue  # пропускаем без адреса
 
             ads.append({
                 "id": f"kufar_{ad_id}",
