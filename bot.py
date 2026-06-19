@@ -84,23 +84,32 @@ async def send_ad(ad: dict):
     image = ad.get("image")
 
     for chat_id in CHAT_IDS:
-        try:
-            if image:
+        no_photo = False
+        if image:
+            try:
                 await bot.send_photo(
                     chat_id=chat_id,
                     photo=image,
                     caption=text,
                     parse_mode="HTML",
                 )
-            else:
+                continue
+            except Exception:
+                no_photo = True
+
+        if no_photo or not image:
+            no_photo_text = text + "\n\n📷 фото нет"
+            if len(no_photo_text) > 1024:
+                no_photo_text = no_photo_text[:1021] + "..."
+            try:
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=text + "\n\n📷 фото нет",
+                    text=no_photo_text,
                     parse_mode="HTML",
                     disable_web_page_preview=False,
                 )
-        except Exception as e:
-            logger.error(f"Failed to send message to {chat_id}: {e}")
+            except Exception as e:
+                logger.error(f"Failed to send message to {chat_id}: {e}")
 
 
 @dp.message(Command("start"))
