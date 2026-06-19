@@ -68,25 +68,37 @@ async def check_new_ads():
 async def send_ad(ad: dict):
     source_emoji = "🟠" if ad["source"] == "kufar" else "🔵"
     price_str = f"${ad['price']}" if ad.get("price") else "цена не указана"
+    byn_str = f" ({ad['price_byn']} BYN)" if ad.get("price_byn") else ""
     address_str = ad.get("address") or "адрес не указан"
 
     text = (
         f"{source_emoji} <b>{ad['source'].upper()}</b>\n"
-        f"💰 <b>{price_str}</b>\n"
-        f"📍 {address_str}\n"
-        f"🔗 <a href='{ad['url']}'>Открыть объявление</a>"
+        f"💰 <b>{price_str}{byn_str}</b>\n"
+        + (f"🕐 {ad['posted_at']}\n" if ad.get("posted_at") else "")
+        + f"📍 {address_str}\n"
+        + f"🔗 <a href='{ad['url']}'>Открыть объявление</a>"
     )
     if ad.get("title"):
         text = f"🏠 {ad['title']}\n" + text
 
+    image = ad.get("image")
+
     for chat_id in CHAT_IDS:
         try:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                parse_mode="HTML",
-                disable_web_page_preview=False,
-            )
+            if image:
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=image,
+                    caption=text,
+                    parse_mode="HTML",
+                )
+            else:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=text + "\n\n📷 фото нет",
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                )
         except Exception as e:
             logger.error(f"Failed to send message to {chat_id}: {e}")
 

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import json
 import logging
 import re
@@ -55,7 +56,7 @@ async def parse_realt(max_price_usd: int = 350) -> list[dict]:
                 if not code:
                     continue
 
-                # Цена в USD из priceRates["840"]
+                # Цены из priceRates
                 price_rates = obj.get("priceRates") or {}
                 price = price_rates.get("840")
                 if price is None:
@@ -65,17 +66,38 @@ async def parse_realt(max_price_usd: int = 350) -> list[dict]:
                 if price > max_price_usd:
                     continue
 
+                price_byn = price_rates.get("933")
+                if price_byn is not None:
+                    price_byn = float(price_byn)
+
+                # Дата публикации
+                posted_at = None
+                raw_time = obj.get("createdAt")
+                if raw_time:
+                    try:
+                        dt = datetime.fromisoformat(raw_time)
+                        posted_at = dt.strftime("%d.%m.%Y %H:%M")
+                    except Exception:
+                        pass
+
                 title = obj.get("title") or "Квартира в аренду"
                 address = obj.get("address") or "Минск"
                 url = f"https://realt.by/rent-flat-for-long/object/{code}/"
+
+                # Первое фото
+                images = obj.get("images", [])
+                image = images[0] if images else None
 
                 ads.append({
                     "id": f"realt_{code}",
                     "title": title,
                     "price": round(price, 2),
+                    "price_byn": round(price_byn, 2) if price_byn else None,
+                    "posted_at": posted_at,
                     "address": address,
                     "url": url,
                     "source": "realt",
+                    "image": image,
                 })
 
             except Exception as e:

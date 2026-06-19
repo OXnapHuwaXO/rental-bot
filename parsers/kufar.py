@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import logging
 import aiohttp
 
@@ -51,17 +52,34 @@ async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
             title = item.get("subject", "")
             url = f"https://www.kufar.by/item/{ad_id}"
 
-            # Цена в USD (API возвращает в центах, делим на 100)
+            # Цены (API возвращает в центах, делим на 100)
             price = None
+            price_byn = None
             raw_price = item.get("price_usd")
             if raw_price:
                 try:
                     price = float(raw_price) / 100
                 except Exception:
                     pass
+            raw_byn = item.get("price_byn")
+            if raw_byn:
+                try:
+                    price_byn = round(float(raw_byn) / 100, 2)
+                except Exception:
+                    pass
 
             if price is not None and price > max_price_usd:
                 continue
+
+            # Дата публикации
+            posted_at = None
+            raw_time = item.get("list_time")
+            if raw_time:
+                try:
+                    dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+                    posted_at = dt.strftime("%d.%m.%Y %H:%M")
+                except Exception:
+                    pass
 
             # Адрес: сначала из account_parameters, потом из ad_parameters
             address_parts = []
@@ -87,13 +105,20 @@ async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
 
             address = ", ".join(address_parts) if address_parts else "Минск"
 
+            # Первое фото
+            images = item.get("images", [])
+            image = f"https://cdn.kufar.by/{images[0]['path']}" if images else None
+
             ads.append({
                 "id": f"kufar_{ad_id}",
                 "title": title,
                 "price": round(price, 2) if price else None,
+                "price_byn": price_byn,
+                "posted_at": posted_at,
                 "address": address,
                 "url": url,
                 "source": "kufar",
+                "image": image,
             })
 
     except asyncio.TimeoutError:
