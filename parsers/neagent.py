@@ -79,8 +79,8 @@ async def parse_neagent(max_price_usd: int = 350) -> list[dict]:
 
                 images = []
                 for img in card.select("img"):
-                    src = img.get("src") or ""
-                    if not src or "empty.png" in src or "noimage" in src or src.startswith("data:"):
+                    src = img.get("data-src") or img.get("src") or ""
+                    if not src or "/f_uploads/" not in src:
                         continue
                     if src.startswith("//"):
                         src = "https:" + src

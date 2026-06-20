@@ -46,13 +46,34 @@ def _parse_price_byn(text: str) -> float | None:
     return None
 
 
+async def _fetch_detail_images(session: aiohttp.ClientSession, url: str, max_images: int = 3) -> list[str]:
+    """Fetch detail page to extract images when card has none."""
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                return []
+            html = await resp.text()
+        soup = BeautifulSoup(html, "html.parser")
+        images = []
+        for img in soup.find_all("img"):
+            src = img.get("src") or ""
+            if "s.domovita.by/images/" in src and "noimage" not in src and "mini" not in src:
+                images.append(src)
+                if len(images) >= max_images:
+                    break
+        return images
+    except Exception as e:
+        logger.debug(f"Failed to fetch detail images from {url}: {e}")
+        return []
+
+
 async def parse_domovita(max_price_usd: int = 350) -> list[dict]:
     ads = []
     page = 1
     limit = 15
 
-    try:
-        async with aiohttp.ClientSession(headers=HEADERS) as session:
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
+        try:
             while page <= limit:
                 url = BASE_URL if page == 1 else f"{BASE_URL}?page={page}"
                 async with session.get(
@@ -148,9 +169,18 @@ async def parse_domovita(max_price_usd: int = 350) -> list[dict]:
                 logger.info(f"Domovita page {page}: {len(cards)} cards")
                 page += 1
 
-    except asyncio.TimeoutError:
-        logger.error("Domovita request timed out")
-    except Exception as e:
-        logger.error(f"Domovita error: {e}", exc_info=True)
+            # Post-process: fetch detail page for listings without card images
+            no_img_ads = [a for a in ads if not a["images"] and a.get("url")]
+            if no_img_ads:
+                logger.info(f"Fetching detail pages for {len(no_img_ads)} ads without images")
+                for ad in no_img_ads:
+                    imgs = await _fetch_detail_images(session, ad["url"])
+                    if imgs:
+                        ad["images"] = imgs
+
+        except asyncio.TimeoutError:
+            logger.error("Domovita request timed out")
+        except Exception as e:
+            logger.error(f"Domovita error: {e}", exc_info=True)
 
     return ads
