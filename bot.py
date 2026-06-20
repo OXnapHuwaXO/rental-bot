@@ -6,6 +6,7 @@ load_dotenv()
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.types import InputMediaPhoto
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from parsers.kufar import parse_kufar
@@ -81,23 +82,22 @@ async def send_ad(ad: dict):
     if ad.get("title"):
         text = f"🏠 {ad['title']}\n" + text
 
-    image = ad.get("image")
+    images = ad.get("images", [])
 
     for chat_id in CHAT_IDS:
-        no_photo = False
-        if image:
+        sent = False
+        if images:
             try:
-                await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=image,
-                    caption=text,
-                    parse_mode="HTML",
-                )
-                continue
+                media = [
+                    InputMediaPhoto(media=url, caption=text if i == 0 else None, parse_mode="HTML")
+                    for i, url in enumerate(images)
+                ]
+                await bot.send_media_group(chat_id=chat_id, media=media)
+                sent = True
             except Exception:
-                no_photo = True
+                pass
 
-        if no_photo or not image:
+        if not sent:
             no_photo_text = text + "\n\n📷 фото нет"
             if len(no_photo_text) > 1024:
                 no_photo_text = no_photo_text[:1021] + "..."

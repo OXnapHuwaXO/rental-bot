@@ -105,9 +105,13 @@ async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
 
             address = ", ".join(address_parts) if address_parts else "Минск"
 
-            # Первое фото
-            images = item.get("images", [])
-            image = f"https://cdn.kufar.by/{images[0]['path']}" if images else None
+            # Фото (до 3 штук)
+            raw_images = item.get("images", [])
+            images = [
+                f"https://rms.kufar.by/v1/gallery/{img['path']}"
+                for img in raw_images[:3]
+                if img.get("path")
+            ]
 
             ads.append({
                 "id": f"kufar_{ad_id}",
@@ -118,7 +122,7 @@ async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
                 "address": address,
                 "url": url,
                 "source": "kufar",
-                "image": image,
+                "images": images,
             })
 
     except asyncio.TimeoutError:

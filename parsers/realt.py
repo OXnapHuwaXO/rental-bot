@@ -84,9 +84,9 @@ async def parse_realt(max_price_usd: int = 350) -> list[dict]:
                 address = obj.get("address") or "Минск"
                 url = f"https://realt.by/rent-flat-for-long/object/{code}/"
 
-                # Первое фото
-                images = obj.get("images", [])
-                image = images[0] if images else None
+                # Фото (до 3 штук)
+                raw_images = obj.get("images", [])
+                images = [img for img in raw_images[:3] if img]
 
                 ads.append({
                     "id": f"realt_{code}",
@@ -97,7 +97,7 @@ async def parse_realt(max_price_usd: int = 350) -> list[dict]:
                     "address": address,
                     "url": url,
                     "source": "realt",
-                    "image": image,
+                    "images": images,
                 })
 
             except Exception as e:
