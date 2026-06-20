@@ -23,14 +23,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-MAX_PRICE_USD = int(os.getenv("MAX_PRICE_USD", "350"))
+DEFAULT_MAX_PRICE_USD = int(os.getenv("MAX_PRICE_USD", "350"))
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "10"))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 storage = Storage("seen_ads.json")
-users = UserManager("users.json")
+users = UserManager("users.json", default_max_price=DEFAULT_MAX_PRICE_USD)
 scheduler = AsyncIOScheduler()
 
 
@@ -39,8 +39,8 @@ async def check_new_ads():
     new_ads = []
 
     try:
-        kufar_ads = await parse_kufar(max_price_usd=MAX_PRICE_USD)
-        logger.info(f"Kufar: found {len(kufar_ads)} ads under ${MAX_PRICE_USD}")
+        kufar_ads = await parse_kufar(max_price_usd=users.get_max_price())
+        logger.info(f"Kufar: found {len(kufar_ads)} ads under ${users.get_max_price()}")
         for ad in kufar_ads:
             if not storage.is_seen(ad["id"]):
                 new_ads.append(ad)
@@ -49,8 +49,8 @@ async def check_new_ads():
         logger.error(f"Kufar parsing error: {e}")
 
     try:
-        realt_ads = await parse_realt(max_price_usd=MAX_PRICE_USD)
-        logger.info(f"Realt: found {len(realt_ads)} ads under ${MAX_PRICE_USD}")
+        realt_ads = await parse_realt(max_price_usd=users.get_max_price())
+        logger.info(f"Realt: found {len(realt_ads)} ads under ${users.get_max_price()}")
         for ad in realt_ads:
             if not storage.is_seen(ad["id"]):
                 new_ads.append(ad)
@@ -59,8 +59,8 @@ async def check_new_ads():
         logger.error(f"Realt parsing error: {e}")
 
     try:
-        onliner_ads = await parse_onliner(max_price_usd=MAX_PRICE_USD)
-        logger.info(f"Onliner: found {len(onliner_ads)} ads under ${MAX_PRICE_USD}")
+        onliner_ads = await parse_onliner(max_price_usd=users.get_max_price())
+        logger.info(f"Onliner: found {len(onliner_ads)} ads under ${users.get_max_price()}")
         for ad in onliner_ads:
             if not storage.is_seen(ad["id"]):
                 new_ads.append(ad)
@@ -69,8 +69,8 @@ async def check_new_ads():
         logger.error(f"Onliner parsing error: {e}")
 
     try:
-        domovita_ads = await parse_domovita(max_price_usd=MAX_PRICE_USD)
-        logger.info(f"Domovita: found {len(domovita_ads)} ads under ${MAX_PRICE_USD}")
+        domovita_ads = await parse_domovita(max_price_usd=users.get_max_price())
+        logger.info(f"Domovita: found {len(domovita_ads)} ads under ${users.get_max_price()}")
         for ad in domovita_ads:
             if not storage.is_seen(ad["id"]):
                 new_ads.append(ad)
@@ -79,8 +79,8 @@ async def check_new_ads():
         logger.error(f"Domovita parsing error: {e}")
 
     try:
-        neagent_ads = await parse_neagent(max_price_usd=MAX_PRICE_USD)
-        logger.info(f"Neagent: found {len(neagent_ads)} ads under ${MAX_PRICE_USD}")
+        neagent_ads = await parse_neagent(max_price_usd=users.get_max_price())
+        logger.info(f"Neagent: found {len(neagent_ads)} ads under ${users.get_max_price()}")
         for ad in neagent_ads:
             if not storage.is_seen(ad["id"]):
                 new_ads.append(ad)
@@ -160,7 +160,7 @@ async def cmd_start(message: Message):
     await message.answer(
         "🏠 <b>Бот мониторинга аренды</b>\n\n"
         f"Слежу за новыми объявлениями на <b>Kufar</b> и <b>Realt</b> "
-        f"до <b>${MAX_PRICE_USD}</b>.\n"
+        f"до <b>${users.get_max_price()}</b>.\n"
         f"Проверка каждые <b>{CHECK_INTERVAL_MINUTES} минут</b>.\n\n"
         "Команды:\n"
         "/start — показать это сообщение\n"
@@ -172,6 +172,8 @@ async def cmd_start(message: Message):
         "/add &lt;id&gt; — добавить получателя\n"
         "/remove &lt;id&gt; — удалить получателя\n"
         "/users — список получателей\n"
+        "/setprice &lt;сумма&gt; — сменить фильтр по цене\n"
+        "/getprice — текущий фильтр по цене\n"
         "/logout — выйти из админки",
         parse_mode="HTML",
     )
@@ -195,7 +197,7 @@ async def cmd_status(message: Message):
     await message.answer(
         f"✅ <b>Бот работает</b>\n\n"
         f"📊 Просмотрено объявлений: <b>{seen_count}</b>\n"
-        f"💰 Максимальная цена: <b>${MAX_PRICE_USD}</b>\n"
+        f"💰 Максимальная цена: <b>${users.get_max_price()}</b>\n"
         f"⏱ Интервал проверки: <b>{CHECK_INTERVAL_MINUTES} мин</b>\n"
         f"👥 Получателей: <b>{recipients}</b>\n"
         f"🔑 Админ: {admin_status}",
@@ -229,6 +231,8 @@ ADMIN_HELP = (
     "/remove &lt;chat_id&gt; — удалить получателя\n"
     "/users — список получателей\n"
     "/admin — показать эту справку\n"
+    "/setprice &lt;сумма&gt; — сменить фильтр по цене ($)\n"
+    "/getprice — текущий фильтр по цене\n"
     "/logout — выйти из админки"
 )
 
@@ -314,6 +318,42 @@ async def cmd_users(message: Message):
         return
     text = "📋 <b>Получатели:</b>\n" + "\n".join(f"• {line}" for line in display)
     await message.answer(text, parse_mode="HTML")
+
+
+@dp.message(Command("setprice"))
+async def cmd_setprice(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Только администратор. Используйте /login")
+        return
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование: /setprice &lt;сумма в USD&gt;")
+        return
+    try:
+        price = int(parts[1])
+    except ValueError:
+        await message.answer("❌ Сумма должна быть числом")
+        return
+    if price <= 0:
+        await message.answer("❌ Сумма должна быть положительной")
+        return
+    users.set_max_price(price)
+    await message.answer(
+        f"✅ Фильтр по цене изменён на <b>${price}</b>\n"
+        f"💰 Текущая максимальная цена: <b>${users.get_max_price()}</b>",
+        parse_mode="HTML",
+    )
+
+
+@dp.message(Command("getprice"))
+async def cmd_getprice(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Только администратор. Используйте /login")
+        return
+    await message.answer(
+        f"💰 Текущий фильтр по цене: <b>${users.get_max_price()}</b>",
+        parse_mode="HTML",
+    )
 
 
 async def main():

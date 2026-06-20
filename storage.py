@@ -40,10 +40,11 @@ class Storage:
 
 
 class UserManager:
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, default_max_price: int = 350):
         self.filepath = filepath
         self.admin_id: int | None = None
         self.users: list[dict] = []
+        self.max_price_usd: int = default_max_price
         self._load()
 
     def _load(self):
@@ -57,16 +58,28 @@ class UserManager:
                         u if isinstance(u, dict) else {"id": u, "username": None}
                         for u in raw
                     ]
-                logger.info(f"Loaded {len(self.users)} users, admin={self.admin_id}")
+                    self.max_price_usd = data.get("max_price_usd", self.max_price_usd)
+                logger.info(f"Loaded {len(self.users)} users, admin={self.admin_id}, max_price=${self.max_price_usd}")
             except Exception as e:
                 logger.error(f"Failed to load users: {e}")
 
     def save(self):
         try:
             with open(self.filepath, "w") as f:
-                json.dump({"admin_id": self.admin_id, "users": self.users}, f)
+                json.dump({
+                    "admin_id": self.admin_id,
+                    "users": self.users,
+                    "max_price_usd": self.max_price_usd,
+                }, f)
         except Exception as e:
             logger.error(f"Failed to save users: {e}")
+
+    def set_max_price(self, price: int):
+        self.max_price_usd = price
+        self.save()
+
+    def get_max_price(self) -> int:
+        return self.max_price_usd
 
     def set_admin(self, chat_id: int):
         self.admin_id = chat_id
