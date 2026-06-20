@@ -5,8 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
-from aiogram.types import Message
-from aiogram.types import InputMediaPhoto
+from aiogram.types import Message, InputMediaPhoto, BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats, BotCommandScopeChat
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from parsers.kufar import parse_kufar
@@ -27,6 +26,47 @@ DEFAULT_MAX_PRICE_USD = int(os.getenv("MAX_PRICE_USD", "350"))
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "10"))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
+USER_COMMANDS = [
+    BotCommand(command="start", description="Показать приветствие"),
+    BotCommand(command="check", description="Проверить объявления сейчас"),
+    BotCommand(command="status", description="Статус бота"),
+    BotCommand(command="myid", description="Узнать свой Chat ID"),
+    BotCommand(command="login", description="Войти в админ-панель"),
+]
+
+ADMIN_COMMANDS = [
+    BotCommand(command="add", description="Добавить получателя"),
+    BotCommand(command="remove", description="Удалить получателя"),
+    BotCommand(command="users", description="Список получателей"),
+    BotCommand(command="admin", description="Помощь по админке"),
+    BotCommand(command="setprice", description="Сменить фильтр по цене"),
+    BotCommand(command="getprice", description="Текущий фильтр по цене"),
+    BotCommand(command="storage", description="Статистика просмотренных"),
+    BotCommand(command="logout", description="Выйти из админки"),
+]
+
+
+async def set_user_commands():
+    await bot.set_my_commands(
+        USER_COMMANDS,
+        scope=BotCommandScopeAllPrivateChats(),
+    )
+
+
+async def set_admin_commands(chat_id: int):
+    full = USER_COMMANDS + ADMIN_COMMANDS
+    await bot.set_my_commands(
+        full,
+        scope=BotCommandScopeChat(chat_id=chat_id),
+    )
+
+
+async def clear_admin_commands(chat_id: int):
+    await bot.set_my_commands(
+        USER_COMMANDS,
+        scope=BotCommandScopeChat(chat_id=chat_id),
+    )
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 storage = Storage("seen_ads.json")
@@ -38,55 +78,38 @@ async def check_new_ads():
     logger.info("Checking for new ads...")
     new_ads = []
 
-    try:
-        kufar_ads = await parse_kufar(max_price_usd=users.get_max_price())
-        logger.info(f"Kufar: found {len(kufar_ads)} ads under ${users.get_max_price()}")
-        for ad in kufar_ads:
-            if not storage.is_seen(ad["id"]):
-                new_ads.append(ad)
-                storage.mark_seen(ad["id"])
-    except Exception as e:
-        logger.error(f"Kufar parsing error: {e}")
+    parsers = [
+        ("Kufar", parse_kufar),
+        ("Realt", parse_realt),
+        ("Onliner", parse_onliner),
+        ("Domovita", parse_domovita),
+        ("Neagent", parse_neagent),
+    ]
 
-    try:
-        realt_ads = await parse_realt(max_price_usd=users.get_max_price())
-        logger.info(f"Realt: found {len(realt_ads)} ads under ${users.get_max_price()}")
-        for ad in realt_ads:
-            if not storage.is_seen(ad["id"]):
-                new_ads.append(ad)
-                storage.mark_seen(ad["id"])
-    except Exception as e:
-        logger.error(f"Realt parsing error: {e}")
+    for name, parser in parsers:
+        try:
+            ads = await parser(max_price_usd=users.get_max_price())
+            logger.info(f"{name}: found {len(ads)} ads under ${users.get_max_price()}")
+            for ad in ads:
+                ad_id = ad["id"]
+                price = ad.get("price")
+                price_byn = ad.get("price_byn")
 
-    try:
-        onliner_ads = await parse_onliner(max_price_usd=users.get_max_price())
-        logger.info(f"Onliner: found {len(onliner_ads)} ads under ${users.get_max_price()}")
-        for ad in onliner_ads:
-            if not storage.is_seen(ad["id"]):
-                new_ads.append(ad)
-                storage.mark_seen(ad["id"])
-    except Exception as e:
-        logger.error(f"Onliner parsing error: {e}")
-
-    try:
-        domovita_ads = await parse_domovita(max_price_usd=users.get_max_price())
-        logger.info(f"Domovita: found {len(domovita_ads)} ads under ${users.get_max_price()}")
-        for ad in domovita_ads:
-            if not storage.is_seen(ad["id"]):
-                new_ads.append(ad)
-                storage.mark_seen(ad["id"])
-    except Exception as e:
-        logger.error(f"Domovita parsing error: {e}")
-
-    try:
-        neagent_ads = await parse_neagent(max_price_usd=users.get_max_price())
-        logger.info(f"Neagent: found {len(neagent_ads)} ads under ${users.get_max_price()}")
-        for ad in neagent_ads:
-            if not storage.is_seen(ad["id"]):
-                new_ads.append(ad)
-                storage.mark_seen(ad["id"])
-    except Exception as e:
-        logger.error(f"Neagent parsing error: {e}")
+                if not storage.is_seen(ad_id):
+                    new_ads.append(ad)
+                    storage.mark_seen(ad_id, price_usd=price, price_byn=price_byn)
+                else:
+                    old = storage.get_ad_data(ad_id)
+                    if old and price is not None:
+                        old_price = old.get("price_usd")
+                        if old_price is not None and price < old_price:
+                            ad["price_drop"] = True
+                            ad["old_price_usd"] = old_price
+                            ad["old_price_byn"] = old.get("price_byn")
+                            new_ads.append(ad)
+                    storage.update_ad_price(ad_id, price, price_byn)
+        except Exception as e:
+            logger.error(f"{name} parsing error: {e}")
 
     if new_ads:
         chat_ids = users.list_users()
@@ -99,11 +122,44 @@ async def check_new_ads():
     storage.save()
 
 
+async def quiet_init():
+    """Первый запуск: собрать ID объявлений без отправки."""
+    logger.info("Storage empty — quiet init: collecting ad IDs without sending")
+    parsers = [
+        ("Kufar", parse_kufar),
+        ("Realt", parse_realt),
+        ("Onliner", parse_onliner),
+        ("Domovita", parse_domovita),
+        ("Neagent", parse_neagent),
+    ]
+    total = 0
+    for name, parser in parsers:
+        try:
+            ads = await parser(max_price_usd=users.get_max_price())
+            count = 0
+            for ad in ads:
+                if not storage.is_seen(ad["id"]):
+                    storage.mark_seen(ad["id"], price_usd=ad.get("price"), price_byn=ad.get("price_byn"))
+                    count += 1
+            total += count
+            logger.info(f"Quiet init [{name}]: marked {count} ads as seen")
+        except Exception as e:
+            logger.error(f"Quiet init [{name}] error: {e}")
+    storage.save()
+    logger.info(f"Quiet init complete: {total} ads cached")
+
+
 async def send_ad(ad: dict, chat_ids: list[int]):
     emoji_map = {"kufar": "🟠", "realt": "🔵", "onliner": "🟢", "domovita": "🟣", "neagent": "🔴"}
     source_emoji = emoji_map.get(ad["source"], "⚪")
     price_str = f"${ad['price']}" if ad.get("price") else "цена не указана"
-    byn_str = f" ({ad['price_byn']} BYN)" if ad.get("price_byn") else ""
+    if ad.get("price_drop") and ad.get("old_price_usd") is not None:
+        price_str += f" <s>(${ad['old_price_usd']})</s>"
+    byn_str = f" ({ad['price_byn']} BYN" if ad.get("price_byn") else ""
+    if ad.get("price_drop") and ad.get("old_price_byn") is not None:
+        byn_str += f", было {ad['old_price_byn']} BYN"
+    if byn_str:
+        byn_str += ")"
     address_str = ad.get("address") or "адрес не указан"
 
     text = (
@@ -174,6 +230,7 @@ async def cmd_start(message: Message):
         "/users — список получателей\n"
         "/setprice &lt;сумма&gt; — сменить фильтр по цене\n"
         "/getprice — текущий фильтр по цене\n"
+        "/storage — статистика просмотренных\n"
         "/logout — выйти из админки",
         parse_mode="HTML",
     )
@@ -221,6 +278,7 @@ async def cmd_login(message: Message):
         await message.answer("❌ Неверный пароль")
         return
     users.set_admin(message.chat.id)
+    await set_admin_commands(message.chat.id)
     await message.answer(admin_help_text(), parse_mode="HTML")
 
 
@@ -233,6 +291,7 @@ ADMIN_HELP = (
     "/admin — показать эту справку\n"
     "/setprice &lt;сумма&gt; — сменить фильтр по цене ($)\n"
     "/getprice — текущий фильтр по цене\n"
+    "/storage — статистика просмотренных объявлений\n"
     "/logout — выйти из админки"
 )
 
@@ -255,6 +314,7 @@ async def cmd_logout(message: Message):
         await message.answer("❌ Вы не авторизованы")
         return
     users.clear_admin()
+    await clear_admin_commands(message.chat.id)
     await message.answer("✅ Вы вышли из админки")
 
 
@@ -356,6 +416,22 @@ async def cmd_getprice(message: Message):
     )
 
 
+@dp.message(Command("storage"))
+async def cmd_storage(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Только администратор. Используйте /login")
+        return
+    total = storage.count()
+    breakdown = storage.breakdown_by_source()
+    lines = [f"📊 <b>Всего просмотрено:</b> {total}"]
+    if breakdown:
+        emoji_map = {"kufar": "🟠", "realt": "🔵", "onliner": "🟢", "domovita": "🟣", "neagent": "🔴"}
+        for src in sorted(breakdown):
+            emoji = emoji_map.get(src, "❓")
+            lines.append(f"{emoji} {src.capitalize()}: <b>{breakdown[src]}</b>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 async def main():
     # Миграция: если users пуст, пробуем забрать из CHAT_IDS или CHAT_ID
     if users.count() == 0:
@@ -368,6 +444,9 @@ async def main():
                 except ValueError:
                     pass
     logger.info(f"Starting bot with {users.count()} recipient(s)...")
+    await set_user_commands()
+    if users.admin_id is not None:
+        await set_admin_commands(users.admin_id)
 
     scheduler.add_job(
         check_new_ads,
@@ -377,7 +456,8 @@ async def main():
     )
     scheduler.start()
 
-    asyncio.create_task(check_new_ads())
+    if storage.count() == 0:
+        await quiet_init()
 
     await dp.start_polling(bot)
 

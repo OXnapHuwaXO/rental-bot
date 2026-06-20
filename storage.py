@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 class Storage:
     def __init__(self, filepath: str):
         self.filepath = filepath
-        self.seen_ids: set = set()
+        self._data: dict[str, dict] = {}
         self._load()
 
     def _load(self):
@@ -16,27 +16,45 @@ class Storage:
             try:
                 with open(self.filepath, "r") as f:
                     data = json.load(f)
-                    self.seen_ids = set(data.get("seen_ids", []))
-                logger.info(f"Loaded {len(self.seen_ids)} seen ads from storage")
+                raw = data.get("ads", data.get("seen_ids", []))
+                if isinstance(raw, list):
+                    self._data = {ad_id: {} for ad_id in raw if isinstance(ad_id, str)}
+                elif isinstance(raw, dict):
+                    self._data = raw
+                logger.info(f"Loaded {len(self._data)} seen ads from storage")
             except Exception as e:
                 logger.error(f"Failed to load storage: {e}")
-                self.seen_ids = set()
+                self._data = {}
 
     def save(self):
         try:
             with open(self.filepath, "w") as f:
-                json.dump({"seen_ids": list(self.seen_ids)}, f)
+                json.dump({"ads": self._data}, f)
         except Exception as e:
             logger.error(f"Failed to save storage: {e}")
 
     def is_seen(self, ad_id: str) -> bool:
-        return ad_id in self.seen_ids
+        return ad_id in self._data
 
-    def mark_seen(self, ad_id: str):
-        self.seen_ids.add(ad_id)
+    def mark_seen(self, ad_id: str, price_usd: float | None = None, price_byn: float | None = None):
+        self._data[ad_id] = {"price_usd": price_usd, "price_byn": price_byn}
+
+    def get_ad_data(self, ad_id: str) -> dict | None:
+        return self._data.get(ad_id)
+
+    def update_ad_price(self, ad_id: str, price_usd: float | None, price_byn: float | None):
+        if ad_id in self._data:
+            self._data[ad_id] = {"price_usd": price_usd, "price_byn": price_byn}
 
     def count(self) -> int:
-        return len(self.seen_ids)
+        return len(self._data)
+
+    def breakdown_by_source(self) -> dict[str, int]:
+        sources: dict[str, int] = {}
+        for ad_id in self._data:
+            prefix = ad_id.split("_")[0] if "_" in ad_id else "unknown"
+            sources[prefix] = sources.get(prefix, 0) + 1
+        return sources
 
 
 class UserManager:
