@@ -91,8 +91,9 @@ async def parse_onliner(max_price_usd: int = 350) -> list[dict]:
             address = (item.get("location") or {}).get("address") or "Минск"
 
             rent_type = item.get("rent_type", "")
+            if rent_type == "room":
+                continue
             title_map = {
-                "room": "Комната",
                 "1_room": "1-комнатная",
                 "2_rooms": "2-комнатная",
                 "3_rooms": "3-комнатная",
