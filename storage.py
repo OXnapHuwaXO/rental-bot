@@ -37,3 +37,83 @@ class Storage:
 
     def count(self) -> int:
         return len(self.seen_ids)
+
+
+class UserManager:
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self.admin_id: int | None = None
+        self.users: list[dict] = []
+        self._load()
+
+    def _load(self):
+        if os.path.exists(self.filepath):
+            try:
+                with open(self.filepath, "r") as f:
+                    data = json.load(f)
+                    self.admin_id = data.get("admin_id")
+                    raw = data.get("users") or data.get("user_ids", [])
+                    self.users = [
+                        u if isinstance(u, dict) else {"id": u, "username": None}
+                        for u in raw
+                    ]
+                logger.info(f"Loaded {len(self.users)} users, admin={self.admin_id}")
+            except Exception as e:
+                logger.error(f"Failed to load users: {e}")
+
+    def save(self):
+        try:
+            with open(self.filepath, "w") as f:
+                json.dump({"admin_id": self.admin_id, "users": self.users}, f)
+        except Exception as e:
+            logger.error(f"Failed to save users: {e}")
+
+    def set_admin(self, chat_id: int):
+        self.admin_id = chat_id
+        self.save()
+
+    def is_admin(self, chat_id: int) -> bool:
+        return self.admin_id == chat_id
+
+    def clear_admin(self):
+        self.admin_id = None
+        self.save()
+
+    def add_user(self, chat_id: int, username: str | None = None) -> bool:
+        if any(u["id"] == chat_id for u in self.users):
+            return False
+        self.users.append({"id": chat_id, "username": username})
+        self.save()
+        return True
+
+    def remove_user(self, chat_id: int) -> bool:
+        for u in self.users:
+            if u["id"] == chat_id:
+                self.users.remove(u)
+                self.save()
+                return True
+        return False
+
+    def list_users(self) -> list[int]:
+        return [u["id"] for u in self.users]
+
+    def list_users_display(self) -> list[str]:
+        result = []
+        for u in self.users:
+            uid = u["id"]
+            name = u.get("username")
+            if name:
+                result.append(f"@{name} <code>{uid}</code>")
+            else:
+                result.append(f"<code>{uid}</code>")
+        return result
+
+    def set_username(self, chat_id: int, username: str | None):
+        for u in self.users:
+            if u["id"] == chat_id:
+                u["username"] = username
+                self.save()
+                break
+
+    def count(self) -> int:
+        return len(self.users)

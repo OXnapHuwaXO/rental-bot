@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from parsers.kufar import parse_kufar
 from parsers.realt import parse_realt
-from storage import Storage
+from storage import Storage, UserManager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,15 +20,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-# Поддержка нескольких получателей: CHAT_IDS=111,222 или старый CHAT_ID=111
-_raw_ids = os.getenv("CHAT_IDS") or os.getenv("CHAT_ID", "")
-CHAT_IDS = [cid.strip() for cid in _raw_ids.split(",") if cid.strip()]
 MAX_PRICE_USD = int(os.getenv("MAX_PRICE_USD", "350"))
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "10"))
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 storage = Storage("seen_ads.json")
+users = UserManager("users.json")
 scheduler = AsyncIOScheduler()
 
 
@@ -57,16 +56,17 @@ async def check_new_ads():
         logger.error(f"Realt parsing error: {e}")
 
     if new_ads:
-        logger.info(f"Sending {len(new_ads)} new ads to {len(CHAT_IDS)} recipients")
+        chat_ids = users.list_users()
+        logger.info(f"Sending {len(new_ads)} new ads to {len(chat_ids)} recipients")
         for ad in new_ads:
-            await send_ad(ad)
+            await send_ad(ad, chat_ids)
     else:
         logger.info("No new ads found")
 
     storage.save()
 
 
-async def send_ad(ad: dict):
+async def send_ad(ad: dict, chat_ids: list[int]):
     source_emoji = "🟠" if ad["source"] == "kufar" else "🔵"
     price_str = f"${ad['price']}" if ad.get("price") else "цена не указана"
     byn_str = f" ({ad['price_byn']} BYN)" if ad.get("price_byn") else ""
@@ -84,7 +84,7 @@ async def send_ad(ad: dict):
 
     images = ad.get("images", [])
 
-    for chat_id in CHAT_IDS:
+    for chat_id in chat_ids:
         sent = False
         if images:
             try:
@@ -110,6 +110,15 @@ async def send_ad(ad: dict):
                 )
             except Exception as e:
                 logger.error(f"Failed to send message to {chat_id}: {e}")
+                continue
+
+        try:
+            chat = await bot.get_chat(chat_id)
+            username = chat.username
+            if username:
+                users.set_username(chat_id, username)
+        except Exception:
+            pass
 
 
 @dp.message(Command("start"))
@@ -123,13 +132,22 @@ async def cmd_start(message: Message):
         "/start — показать это сообщение\n"
         "/check — проверить прямо сейчас\n"
         "/status — статус бота\n"
-        "/myid — узнать свой Chat ID",
+        "/myid — узнать свой Chat ID\n"
+        "/login &lt;пароль&gt; — войти в админку\n\n"
+        "Админ-команды:\n"
+        "/add &lt;id&gt; — добавить получателя\n"
+        "/remove &lt;id&gt; — удалить получателя\n"
+        "/users — список получателей\n"
+        "/logout — выйти из админки",
         parse_mode="HTML",
     )
 
 
 @dp.message(Command("check"))
 async def cmd_check(message: Message):
+    if not users.list_users():
+        await message.answer("⚠️ Нет получателей. Добавьте через /add команду (требуется админ).")
+        return
     await message.answer("🔍 Проверяю объявления...")
     await check_new_ads()
     await message.answer("✅ Проверка завершена!")
@@ -138,13 +156,15 @@ async def cmd_check(message: Message):
 @dp.message(Command("status"))
 async def cmd_status(message: Message):
     seen_count = storage.count()
-    recipients = len(CHAT_IDS)
+    recipients = users.count()
+    admin_status = "✅" if users.is_admin(message.chat.id) else "❌"
     await message.answer(
         f"✅ <b>Бот работает</b>\n\n"
         f"📊 Просмотрено объявлений: <b>{seen_count}</b>\n"
         f"💰 Максимальная цена: <b>${MAX_PRICE_USD}</b>\n"
         f"⏱ Интервал проверки: <b>{CHECK_INTERVAL_MINUTES} мин</b>\n"
-        f"👥 Получателей: <b>{recipients}</b>",
+        f"👥 Получателей: <b>{recipients}</b>\n"
+        f"🔑 Админ: {admin_status}",
         parse_mode="HTML",
     )
 
@@ -154,8 +174,126 @@ async def cmd_myid(message: Message):
     await message.answer(f"Ваш Chat ID: <code>{message.chat.id}</code>", parse_mode="HTML")
 
 
+@dp.message(Command("login"))
+async def cmd_login(message: Message):
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование: /login &lt;пароль&gt;")
+        return
+    password = parts[1]
+    if password != ADMIN_PASSWORD:
+        await message.answer("❌ Неверный пароль")
+        return
+    users.set_admin(message.chat.id)
+    await message.answer(admin_help_text(), parse_mode="HTML")
+
+
+ADMIN_HELP = (
+    "🔑 <b>Админ-панель</b>\n\n"
+    "Команды:\n"
+    "/add &lt;chat_id&gt; — добавить получателя\n"
+    "/remove &lt;chat_id&gt; — удалить получателя\n"
+    "/users — список получателей\n"
+    "/admin — показать эту справку\n"
+    "/logout — выйти из админки"
+)
+
+
+def admin_help_text() -> str:
+    return "✅ <b>Вы авторизованы как администратор</b>\n\n" + ADMIN_HELP
+
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Только администратор. Используйте /login")
+        return
+    await message.answer(ADMIN_HELP, parse_mode="HTML")
+
+
+@dp.message(Command("logout"))
+async def cmd_logout(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Вы не авторизованы")
+        return
+    users.clear_admin()
+    await message.answer("✅ Вы вышли из админки")
+
+
+@dp.message(Command("add"))
+async def cmd_add(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Только администратор. Используйте /login")
+        return
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование: /add &lt;chat_id&gt;")
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await message.answer("❌ Chat ID должен быть числом. Узнать: /myid")
+        return
+    if users.add_user(chat_id):
+        try:
+            chat = await bot.get_chat(chat_id)
+            username = chat.username
+            if username:
+                users.set_username(chat_id, username)
+                await message.answer(f"✅ @{username} (<code>{chat_id}</code>) добавлен", parse_mode="HTML")
+            else:
+                await message.answer(f"✅ Пользователь <code>{chat_id}</code> добавлен", parse_mode="HTML")
+        except Exception:
+            await message.answer(f"✅ Пользователь <code>{chat_id}</code> добавлен", parse_mode="HTML")
+    else:
+        await message.answer(f"ℹ️ Пользователь <code>{chat_id}</code> уже в списке", parse_mode="HTML")
+
+
+@dp.message(Command("remove"))
+async def cmd_remove(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Только администратор. Используйте /login")
+        return
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование: /remove &lt;chat_id&gt;")
+        return
+    try:
+        chat_id = int(parts[1])
+    except ValueError:
+        await message.answer("❌ Chat ID должен быть числом")
+        return
+    if users.remove_user(chat_id):
+        await message.answer(f"✅ Пользователь <code>{chat_id}</code> удалён", parse_mode="HTML")
+    else:
+        await message.answer(f"❌ Пользователь <code>{chat_id}</code> не найден", parse_mode="HTML")
+
+
+@dp.message(Command("users"))
+async def cmd_users(message: Message):
+    if not users.is_admin(message.chat.id):
+        await message.answer("❌ Только администратор. Используйте /login")
+        return
+    display = users.list_users_display()
+    if not display:
+        await message.answer("📋 Список получателей пуст")
+        return
+    text = "📋 <b>Получатели:</b>\n" + "\n".join(f"• {line}" for line in display)
+    await message.answer(text, parse_mode="HTML")
+
+
 async def main():
-    logger.info(f"Starting bot with {len(CHAT_IDS)} recipient(s)...")
+    # Миграция: если users пуст, пробуем забрать из CHAT_IDS или CHAT_ID
+    if users.count() == 0:
+        old_ids = os.getenv("CHAT_IDS") or os.getenv("CHAT_ID", "")
+        for cid in old_ids.split(","):
+            cid = cid.strip()
+            if cid:
+                try:
+                    users.add_user(int(cid))
+                except ValueError:
+                    pass
+    logger.info(f"Starting bot with {users.count()} recipient(s)...")
 
     scheduler.add_job(
         check_new_ads,

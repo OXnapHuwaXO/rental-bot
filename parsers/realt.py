@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 import logging
 import re
@@ -70,12 +71,16 @@ async def parse_realt(max_price_usd: int = 350) -> list[dict]:
                 if price_byn is not None:
                     price_byn = float(price_byn)
 
-                # Дата публикации
+                # Дата публикации (конвертируем в Минск UTC+3)
                 posted_at = None
                 raw_time = obj.get("createdAt")
                 if raw_time:
                     try:
                         dt = datetime.fromisoformat(raw_time)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=ZoneInfo("Europe/Minsk"))
+                        else:
+                            dt = dt.astimezone(ZoneInfo("Europe/Minsk"))
                         posted_at = dt.strftime("%d.%m.%Y %H:%M")
                     except Exception:
                         pass

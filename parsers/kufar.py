@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import logging
 import aiohttp
 
@@ -71,12 +72,13 @@ async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
             if price is not None and price > max_price_usd:
                 continue
 
-            # Дата публикации
+            # Дата публикации (list_time в UTC, конвертируем в Минск UTC+3)
             posted_at = None
             raw_time = item.get("list_time")
             if raw_time:
                 try:
                     dt = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+                    dt = dt.astimezone(ZoneInfo("Europe/Minsk"))
                     posted_at = dt.strftime("%d.%m.%Y %H:%M")
                 except Exception:
                     pass
