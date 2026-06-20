@@ -11,6 +11,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from parsers.kufar import parse_kufar
 from parsers.realt import parse_realt
+from parsers.onliner import parse_onliner
+from parsers.domovita import parse_domovita
+from parsers.neagent import parse_neagent
 from storage import Storage, UserManager
 
 logging.basicConfig(
@@ -55,6 +58,36 @@ async def check_new_ads():
     except Exception as e:
         logger.error(f"Realt parsing error: {e}")
 
+    try:
+        onliner_ads = await parse_onliner(max_price_usd=MAX_PRICE_USD)
+        logger.info(f"Onliner: found {len(onliner_ads)} ads under ${MAX_PRICE_USD}")
+        for ad in onliner_ads:
+            if not storage.is_seen(ad["id"]):
+                new_ads.append(ad)
+                storage.mark_seen(ad["id"])
+    except Exception as e:
+        logger.error(f"Onliner parsing error: {e}")
+
+    try:
+        domovita_ads = await parse_domovita(max_price_usd=MAX_PRICE_USD)
+        logger.info(f"Domovita: found {len(domovita_ads)} ads under ${MAX_PRICE_USD}")
+        for ad in domovita_ads:
+            if not storage.is_seen(ad["id"]):
+                new_ads.append(ad)
+                storage.mark_seen(ad["id"])
+    except Exception as e:
+        logger.error(f"Domovita parsing error: {e}")
+
+    try:
+        neagent_ads = await parse_neagent(max_price_usd=MAX_PRICE_USD)
+        logger.info(f"Neagent: found {len(neagent_ads)} ads under ${MAX_PRICE_USD}")
+        for ad in neagent_ads:
+            if not storage.is_seen(ad["id"]):
+                new_ads.append(ad)
+                storage.mark_seen(ad["id"])
+    except Exception as e:
+        logger.error(f"Neagent parsing error: {e}")
+
     if new_ads:
         chat_ids = users.list_users()
         logger.info(f"Sending {len(new_ads)} new ads to {len(chat_ids)} recipients")
@@ -67,7 +100,8 @@ async def check_new_ads():
 
 
 async def send_ad(ad: dict, chat_ids: list[int]):
-    source_emoji = "🟠" if ad["source"] == "kufar" else "🔵"
+    emoji_map = {"kufar": "🟠", "realt": "🔵", "onliner": "🟢", "domovita": "🟣", "neagent": "🔴"}
+    source_emoji = emoji_map.get(ad["source"], "⚪")
     price_str = f"${ad['price']}" if ad.get("price") else "цена не указана"
     byn_str = f" ({ad['price_byn']} BYN)" if ad.get("price_byn") else ""
     address_str = ad.get("address") or "адрес не указан"
