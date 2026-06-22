@@ -279,7 +279,7 @@ async def cmd_login(message: Message):
     if password != ADMIN_PASSWORD:
         await message.answer("❌ Неверный пароль")
         return
-    users.set_admin(message.chat.id)
+    users.add_admin(message.chat.id)
     await set_admin_commands(message.chat.id)
     await message.answer(admin_help_text(), parse_mode="HTML")
 
@@ -315,7 +315,7 @@ async def cmd_logout(message: Message):
     if not users.is_admin(message.chat.id):
         await message.answer("❌ Вы не авторизованы")
         return
-    users.clear_admin()
+    users.remove_admin(message.chat.id)
     await clear_admin_commands(message.chat.id)
     await message.answer("✅ Вы вышли из админки")
 
@@ -384,25 +384,26 @@ async def cmd_users(message: Message):
         except Exception:
             pass
 
-    admin_id = users.get_admin_id()
-    admin_info = "❓"
-    if admin_id:
+    admin_ids = users.get_admin_ids()
+    admin_lines = []
+    for aid in admin_ids:
         try:
-            chat = await bot.get_chat(admin_id)
+            chat = await bot.get_chat(aid)
             uname = chat.username
             if uname:
-                admin_info = f"@{uname} <code>{admin_id}</code>"
+                admin_lines.append(f"@{uname} <code>{aid}</code>")
             else:
-                admin_info = f"<code>{admin_id}</code>"
+                admin_lines.append(f"<code>{aid}</code>")
         except Exception:
-            admin_info = f"<code>{admin_id}</code>"
+            admin_lines.append(f"<code>{aid}</code>")
+    admin_info = "\n".join(admin_lines) if admin_lines else "❓"
 
     display = users.list_users_display()
     if not display:
-        text = f"🔑 <b>Админ:</b> {admin_info}\n📋 Получателей нет"
+        text = f"🔑 <b>Админы:</b>\n{admin_info}\n\n📋 Получателей нет"
     else:
         text = (
-            f"🔑 <b>Админ:</b> {admin_info}\n\n"
+            f"🔑 <b>Админы:</b>\n{admin_info}\n\n"
             f"📋 <b>Получатели:</b>\n" + "\n".join(f"• {line}" for line in display)
         )
     await message.answer(text, parse_mode="HTML")
@@ -473,8 +474,8 @@ async def main():
                     pass
     logger.info(f"Starting bot with {users.count()} recipient(s)...")
     await set_user_commands()
-    if users.admin_id is not None:
-        await set_admin_commands(users.admin_id)
+    for aid in users.get_admin_ids():
+        await set_admin_commands(aid)
 
     scheduler.add_job(
         check_new_ads,

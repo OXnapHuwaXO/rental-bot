@@ -60,7 +60,7 @@ class Storage:
 class UserManager:
     def __init__(self, filepath: str, default_max_price: int = 350):
         self.filepath = filepath
-        self.admin_id: int | None = None
+        self.admin_ids: list[int] = []
         self.users: list[dict] = []
         self.max_price_usd: int = default_max_price
         self._load()
@@ -70,14 +70,19 @@ class UserManager:
             try:
                 with open(self.filepath, "r") as f:
                     data = json.load(f)
-                    self.admin_id = data.get("admin_id")
-                    raw = data.get("users") or data.get("user_ids", [])
-                    self.users = [
-                        u if isinstance(u, dict) else {"id": u, "username": None}
-                        for u in raw
-                    ]
-                    self.max_price_usd = data.get("max_price_usd", self.max_price_usd)
-                logger.info(f"Loaded {len(self.users)} users, admin={self.admin_id}, max_price=${self.max_price_usd}")
+                raw_ids = data.get("admin_ids")
+                if raw_ids is None:
+                    old = data.get("admin_id")
+                    self.admin_ids = [old] if old is not None else []
+                else:
+                    self.admin_ids = list(raw_ids)
+                raw = data.get("users") or data.get("user_ids", [])
+                self.users = [
+                    u if isinstance(u, dict) else {"id": u, "username": None}
+                    for u in raw
+                ]
+                self.max_price_usd = data.get("max_price_usd", self.max_price_usd)
+                logger.info(f"Loaded {len(self.users)} users, admins={self.admin_ids}, max_price=${self.max_price_usd}")
             except Exception as e:
                 logger.error(f"Failed to load users: {e}")
 
@@ -85,7 +90,7 @@ class UserManager:
         try:
             with open(self.filepath, "w") as f:
                 json.dump({
-                    "admin_id": self.admin_id,
+                    "admin_ids": self.admin_ids,
                     "users": self.users,
                     "max_price_usd": self.max_price_usd,
                 }, f)
@@ -99,18 +104,24 @@ class UserManager:
     def get_max_price(self) -> int:
         return self.max_price_usd
 
-    def set_admin(self, chat_id: int):
-        self.admin_id = chat_id
-        self.save()
+    def add_admin(self, chat_id: int):
+        if chat_id not in self.admin_ids:
+            self.admin_ids.append(chat_id)
+            self.save()
 
     def is_admin(self, chat_id: int) -> bool:
-        return self.admin_id == chat_id
+        return chat_id in self.admin_ids
 
-    def get_admin_id(self) -> int | None:
-        return self.admin_id
+    def get_admin_ids(self) -> list[int]:
+        return list(self.admin_ids)
 
-    def clear_admin(self):
-        self.admin_id = None
+    def remove_admin(self, chat_id: int):
+        if chat_id in self.admin_ids:
+            self.admin_ids.remove(chat_id)
+            self.save()
+
+    def clear_admins(self):
+        self.admin_ids = []
         self.save()
 
     def add_user(self, chat_id: int, username: str | None = None) -> bool:
