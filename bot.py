@@ -102,10 +102,12 @@ async def check_new_ads():
                     old = storage.get_ad_data(ad_id)
                     if old and price is not None:
                         old_price = old.get("price_usd")
-                        if old_price is not None and price < old_price:
+                        old_byn = old.get("price_byn")
+                        if (old_price is not None and price < old_price
+                                and old_byn is not None and price_byn is not None and price_byn < old_byn):
                             ad["price_drop"] = True
                             ad["old_price_usd"] = old_price
-                            ad["old_price_byn"] = old.get("price_byn")
+                            ad["old_price_byn"] = old_byn
                             new_ads.append(ad)
                     storage.update_ad_price(ad_id, price, price_byn)
         except Exception as e:
