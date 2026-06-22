@@ -151,3 +151,6 @@ class UserManager:
 
     def count(self) -> int:
         return len(self.users)
+
+    def users_without_username(self) -> list[int]:
+        return [u["id"] for u in self.users if not u.get("username")]

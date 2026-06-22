@@ -375,6 +375,15 @@ async def cmd_users(message: Message):
         await message.answer("❌ Только администратор. Используйте /login")
         return
 
+    # Дозаполняем username, если пустые
+    for u in users.users_without_username():
+        try:
+            chat = await bot.get_chat(u)
+            if chat.username:
+                users.set_username(u, chat.username)
+        except Exception:
+            pass
+
     admin_id = users.get_admin_id()
     admin_info = "❓"
     if admin_id:
