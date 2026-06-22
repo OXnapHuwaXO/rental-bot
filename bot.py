@@ -374,11 +374,28 @@ async def cmd_users(message: Message):
     if not users.is_admin(message.chat.id):
         await message.answer("❌ Только администратор. Используйте /login")
         return
+
+    admin_id = users.get_admin_id()
+    admin_info = "❓"
+    if admin_id:
+        try:
+            chat = await bot.get_chat(admin_id)
+            uname = chat.username
+            if uname:
+                admin_info = f"@{uname} <code>{admin_id}</code>"
+            else:
+                admin_info = f"<code>{admin_id}</code>"
+        except Exception:
+            admin_info = f"<code>{admin_id}</code>"
+
     display = users.list_users_display()
     if not display:
-        await message.answer("📋 Список получателей пуст")
-        return
-    text = "📋 <b>Получатели:</b>\n" + "\n".join(f"• {line}" for line in display)
+        text = f"🔑 <b>Админ:</b> {admin_info}\n📋 Получателей нет"
+    else:
+        text = (
+            f"🔑 <b>Админ:</b> {admin_info}\n\n"
+            f"📋 <b>Получатели:</b>\n" + "\n".join(f"• {line}" for line in display)
+        )
     await message.answer(text, parse_mode="HTML")
 
 

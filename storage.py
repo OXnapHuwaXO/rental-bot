@@ -106,6 +106,9 @@ class UserManager:
     def is_admin(self, chat_id: int) -> bool:
         return self.admin_id == chat_id
 
+    def get_admin_id(self) -> int | None:
+        return self.admin_id
+
     def clear_admin(self):
         self.admin_id = None
         self.save()
