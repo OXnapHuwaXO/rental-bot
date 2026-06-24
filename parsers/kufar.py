@@ -29,6 +29,7 @@ async def parse_kufar(max_price_usd: int = 350) -> list[dict]:
         "size": 30,
         "lang": "ru",
         "rgn": "7",              # Только Минск (ID региона)
+        "company_ad": 0,         # Только частные объявления (без агентств)
     }
 
     ads = []
